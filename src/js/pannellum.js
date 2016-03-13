@@ -477,6 +477,11 @@ function parseGPanoXMP(image) {
         reader.readAsBinaryString(image);
     else
         reader.readAsText(image);
+
+    if( config.callbacks && config.callbacks.parseGPanoXMP )
+    {
+			config.callbacks.parseGPanoXMP( image );
+		}
 }
 
 /**
@@ -1174,6 +1179,7 @@ function render() {
 function renderInit() {
     try {
         renderer.init(config.haov * Math.PI / 180, config.vaov * Math.PI / 180, config.vOffset * Math.PI / 180, renderInitCallback);
+
     } catch(event) {
         // Panorama not loaded
         
@@ -1228,6 +1234,10 @@ function renderInitCallback() {
         preview = undefined;
     }
     loaded = true;
+
+		if( config.callbacks && config.callbacks.renderInit ){
+			config.callbacks.renderInit();
+		}
     
     animateInit();
 }
@@ -1835,6 +1845,10 @@ this.setHfovBounds = function(bounds) {
     config.minHfov = Math.max(0, bounds[0]);
     config.maxHfov = Math.max(0, bounds[1]);
     return this;
+};
+
+this.getNorthOffset = function() {
+	return config.northOffset ;
 };
 
 /**
