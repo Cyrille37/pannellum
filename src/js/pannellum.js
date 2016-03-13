@@ -1159,6 +1159,11 @@ function render() {
             compass.style.transform = 'rotate(' + (-config.yaw - config.northOffset) + 'deg)';
             compass.style.webkitTransform = 'rotate(' + (-config.yaw - config.northOffset) + 'deg)';
         }
+ 
+ 				if( config.callbacks && config.callbacks.rendered ){
+ 					config.callbacks.rendered();
+ 				}
+
     }
 }
 
