@@ -1941,7 +1941,9 @@ this.loadScene = function(sceneId, pitch, yaw, hfov) {
  * @returns {string} ID of current scene
  */
 this.getScene = function() {
-    return config.scene;
+	// https://github.com/mpetroff/pannellum/issues/130
+	return config.activeScene ;
+  //return config.scene;
 }
 
 this.getScenes = function() {
