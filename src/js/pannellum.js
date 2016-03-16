@@ -1848,10 +1848,6 @@ this.setHfovBounds = function(bounds) {
     return this;
 };
 
-this.getNorthOffset = function() {
-  return config.northOffset ;
-};
-
 this.getHotspots = function() {
   return config.hotSpots ;
 };
