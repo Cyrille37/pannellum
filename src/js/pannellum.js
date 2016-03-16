@@ -480,8 +480,8 @@ function parseGPanoXMP(image) {
 
     if( config.callbacks && config.callbacks.parseGPanoXMP )
     {
-			config.callbacks.parseGPanoXMP( image );
-		}
+      config.callbacks.parseGPanoXMP( image );
+    }
 }
 
 /**
@@ -1154,20 +1154,20 @@ function render() {
 
         // Ensure the calculated pitch is within min and max allowed
         config.pitch = Math.max(config.minPitch, Math.min(config.maxPitch, config.pitch));
-        
+
         renderer.render(config.pitch * Math.PI / 180, config.yaw * Math.PI / 180, config.hfov * Math.PI / 180);
-        
+
         renderHotSpots();
-        
+
         // Update compass
         if (config.compass) {
             compass.style.transform = 'rotate(' + (-config.yaw - config.northOffset) + 'deg)';
             compass.style.webkitTransform = 'rotate(' + (-config.yaw - config.northOffset) + 'deg)';
         }
- 
- 				if( config.callbacks && config.callbacks.rendered ){
- 					config.callbacks.rendered();
- 				}
+
+        if( config.callbacks && config.callbacks.rendered ){
+          config.callbacks.rendered();
+        }
 
     }
 }
@@ -1235,9 +1235,9 @@ function renderInitCallback() {
     }
     loaded = true;
 
-		if( config.callbacks && config.callbacks.renderInit ){
-			config.callbacks.renderInit();
-		}
+    if( config.callbacks && config.callbacks.renderInit ){
+      config.callbacks.renderInit();
+    }
     
     animateInit();
 }
@@ -1349,6 +1349,7 @@ function destroyHotSpots() {
  * @private
  */
 function renderHotSpots() {
+
     config.hotSpots.forEach(function(hs) {
         var hsPitchSin = Math.sin(hs.pitch * Math.PI / 180);
         var hsPitchCos = Math.cos(hs.pitch * Math.PI / 180);
@@ -1848,8 +1849,20 @@ this.setHfovBounds = function(bounds) {
 };
 
 this.getNorthOffset = function() {
-	return config.northOffset ;
+  return config.northOffset ;
 };
+
+this.getHotspots = function() {
+  return config.hotSpots ;
+};
+
+this.setHotspots = function( hotSpots ) {
+
+  destroyHotSpots();
+  config.hotSpots = hotSpots ;
+  createHotSpots();
+};
+
 
 /**
  * Returns the panorama renderer.
@@ -1911,6 +1924,10 @@ this.loadScene = function(sceneId, pitch, yaw, hfov) {
  */
 this.getScene = function() {
     return config.scene;
+}
+
+this.getScenes = function() {
+    return config.scenes;
 }
 
 /**
