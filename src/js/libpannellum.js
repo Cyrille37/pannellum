@@ -29,40 +29,66 @@ window.libpannellum = (function(window, document, undefined) {
  * Creates a new panorama renderer.
  * @constructor
  * @param {HTMLElement} container - The container element for the renderer.
- * @param {Image|Array|Object} image - Input image; format varies based on
- *      `imageType`. For `equirectangular`, this is an image; for `cubemap`,
- *      this is an array of images for the cube faces in the order [+z, +x, -z,
- *      -x, +y, -y]; for `multires`, this is a configuration object.
- * @param {string} imageType - The type of the image: `equirectangular`,
- *      `cubemap`, or `multires`.
- * @param {boolean} dynamic - Whether or not the image is dynamic (e.g. video).
  */
-function Renderer(container, image, imageType, dynamic) {
+function Renderer(container) {
     var canvas = document.createElement('canvas');
     canvas.style.width = canvas.style.height = '100%';
     container.appendChild(canvas);
 
-    // Default argument for image type
-    if (typeof imageType === undefined){
-        imageType = 'equirectangular';
-    }
-
-    var program, gl;
+    var program, gl, vs, fs;
     var fallbackImgSize;
     var world;
     var vtmps;
     var pose;
+    var image, imageType, dynamic;
+    var texCoordBuffer, cubeVertBuf, cubeVertTexCoordBuf, cubeVertIndBuf;
 
     /**
      * Initialize renderer.
      * @memberof Renderer
      * @instance
+     * @param {Image|Array|Object} image - Input image; format varies based on
+     *      `imageType`. For `equirectangular`, this is an image; for
+     *      `cubemap`, this is an array of images for the cube faces in the
+     *      order [+z, +x, -z, -x, +y, -y]; for `multires`, this is a
+     *      configuration object.
+     * @param {string} imageType - The type of the image: `equirectangular`,
+     *      `cubemap`, or `multires`.
+     * @param {boolean} dynamic - Whether or not the image is dynamic (e.g. video).
      * @param {number} haov - Initial horizontal angle of view.
      * @param {number} vaov - Initial vertical angle of view.
      * @param {number} voffset - Initial vertical offset angle.
      * @param {function} callback - Load callback function.
      */
-    this.init = function(haov, vaov, voffset, callback) {
+    this.init = function(_image, _imageType, _dynamic, haov, vaov, voffset, callback) {
+        // Default argument for image type
+        if (typeof _imageType === undefined)
+            _imageType = 'equirectangular';
+        imageType = _imageType;
+        image = _image;
+        dynamic = _dynamic;
+
+        // Clear old data
+        if (program) {
+            if (vs) {
+                gl.detachShader(program, vs);
+                gl.deleteShader(vs);
+            }
+            if (fs) {
+                gl.detachShader(program, fs);
+                gl.deleteShader(fs);
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, null);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+            if (program.texture)
+                gl.deleteTexture(program.texture);
+            if (program.nodeCache)
+                for (var i = 0; i < program.nodeCache.length; i++)
+                    gl.deleteTexture(program.nodeCache[i].texture);
+            gl.deleteProgram(program);
+            program = undefined;
+        }
+
         var s;
         
         // This awful browser specific test exists because iOS 8/9 and IE 11
@@ -77,7 +103,8 @@ function Renderer(container, image, imageType, dynamic) {
             navigator.userAgent.toLowerCase().match(/(iphone|ipod|ipad).* os 9_/) ||
             navigator.userAgent.match(/Trident.*rv[ :]*11\./)))) {
             // Enable WebGL on canvas
-            gl = canvas.getContext('experimental-webgl', {alpha: false, depth: false});
+            if (!gl)
+                gl = canvas.getContext('experimental-webgl', {alpha: false, depth: false});
         }
         
         // If there is no WebGL, fall back to CSS 3D transform renderer.
@@ -232,7 +259,7 @@ function Renderer(container, image, imageType, dynamic) {
         gl.viewport(0, 0, canvas.width, canvas.height);
 
         // Create vertex shader
-        var vs = gl.createShader(gl.VERTEX_SHADER);
+        vs = gl.createShader(gl.VERTEX_SHADER);
         var vertexSrc = v;
         if (imageType == 'multires') {
             vertexSrc = vMulti;
@@ -241,7 +268,7 @@ function Renderer(container, image, imageType, dynamic) {
         gl.compileShader(vs);
 
         // Create fragment shader
-        var fs = gl.createShader(gl.FRAGMENT_SHADER);
+        fs = gl.createShader(gl.FRAGMENT_SHADER);
         var fragmentSrc = fragEquirectangular;
         if (imageType == 'cubemap') {
             glBindType = gl.TEXTURE_CUBE_MAP;
@@ -277,8 +304,9 @@ function Renderer(container, image, imageType, dynamic) {
 
         if (imageType != 'multires') {
             // Provide texture coordinates for rectangle
-            program.texCoordBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, program.texCoordBuffer);
+            if (!texCoordBuffer)
+                texCoordBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,1,1,1,1,-1,-1,1,1,-1,-1,-1]), gl.STATIC_DRAW);
             gl.vertexAttribPointer(program.texCoordLocation, 2, gl.FLOAT, false, 0, 0);
 
@@ -330,16 +358,19 @@ function Renderer(container, image, imageType, dynamic) {
             gl.enableVertexAttribArray(program.vertPosLocation);
 
             // Create buffers
-            program.cubeVertBuf = gl.createBuffer();
-            program.cubeVertTexCoordBuf = gl.createBuffer();
-            program.cubeVertIndBuf = gl.createBuffer();
+            if (!cubeVertBuf)
+                cubeVertBuf = gl.createBuffer();
+            if (!cubeVertTexCoordBuf)
+                cubeVertTexCoordBuf = gl.createBuffer();
+            if (!cubeVertIndBuf)
+                cubeVertIndBuf = gl.createBuffer();
 
             // Bind texture coordinate buffer and pass coordinates to WebGL
-            gl.bindBuffer(gl.ARRAY_BUFFER, program.cubeVertTexCoordBuf);
+            gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertTexCoordBuf);
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0,1,0,1,1,0,1]), gl.STATIC_DRAW);
 
             // Bind square index buffer and pass indicies to WebGL
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, program.cubeVertIndBuf);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeVertIndBuf);
             gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0,1,2,0,2,3]), gl.STATIC_DRAW);
 
             // Find uniforms
@@ -402,13 +433,19 @@ function Renderer(container, image, imageType, dynamic) {
      * Render new view of panorama.
      * @memberof Renderer
      * @instance
-     * @param {number} pitch - Pitch to render at.
-     * @param {number} yaw - Yaw to render at.
-     * @param {number} hfov - Horizontal field of view to render with.
-     * @param {boolean} returnImage - Return rendered image?
+     * @param {number} pitch - Pitch to render at (in radians).
+     * @param {number} yaw - Yaw to render at (in radians).
+     * @param {number} hfov - Horizontal field of view to render with (in radians).
+     * @param {Object} [params] - Extra configuration parameters. 
+     * @param {number} [params.roll] - Camera roll (in radians).
+     * @param {boolean} [params.returnImage] - Return rendered image?
      */
-    this.render = function(pitch, yaw, hfov, returnImage) {
-        var focal, i, s;
+    this.render = function(pitch, yaw, hfov, params) {
+        var focal, i, s, roll = 0;
+        if (params === undefined)
+            params = {};
+        if (params.roll)
+            roll = params.roll;
         
         // If no WebGL
         if (!gl && (imageType == 'multires' || imageType == 'cubemap')) {
@@ -458,7 +495,7 @@ function Renderer(container, image, imageType, dynamic) {
                     z = Math.cos(horizonRoll) * Math.cos(horizonPitch) * Math.sin(pitch) +
                         Math.cos(pitch) * (-Math.cos(yaw) * Math.sin(horizonPitch) +
                         Math.cos(horizonPitch) * Math.sin(horizonRoll) * Math.sin(yaw));
-                pitch = Math.asin(z);
+                pitch = Math.asin(Math.max(Math.min(z, 1), -1));
                 yaw = Math.atan2(y, x);
 
                 // Calculate roll
@@ -468,17 +505,18 @@ function Renderer(container, image, imageType, dynamic) {
                         Math.cos(orig_pitch) * (Math.cos(horizonPitch) * Math.sin(horizonRoll) * Math.cos(orig_yaw) +
                         Math.sin(orig_yaw) * Math.sin(horizonPitch))],
                     w = [-Math.cos(pitch) * Math.sin(yaw), Math.cos(pitch) * Math.cos(yaw)];
-                var roll = Math.acos((v[0]*w[0] + v[1]*w[1]) /
+                var roll_adj = Math.acos(Math.max(Math.min((v[0]*w[0] + v[1]*w[1]) /
                     (Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]) *
-                    Math.sqrt(w[0]*w[0]+w[1]*w[1])));
+                    Math.sqrt(w[0]*w[0]+w[1]*w[1])), 1), -1));
                 if (v[2] < 0)
-                    roll = 2 * Math.PI - roll;
-                gl.uniform1f(program.rot, roll);
+                    roll_adj = 2 * Math.PI - roll_adj;
+                roll += roll_adj;
             }
 
-            // Pass psi, theta, and focal length
+            // Pass psi, theta, roll, and focal length
             gl.uniform1f(program.psi, yaw);
             gl.uniform1f(program.theta, pitch);
+            gl.uniform1f(program.rot, roll);
             gl.uniform1f(program.f, focal);
             
             if (dynamic === true) {
@@ -501,6 +539,7 @@ function Renderer(container, image, imageType, dynamic) {
             
             // Create rotation matrix
             var matrix = identityMatrix3();
+            matrix = rotateMatrix(matrix, -roll, 'z');
             matrix = rotateMatrix(matrix, -pitch, 'x');
             matrix = rotateMatrix(matrix, yaw, 'y');
             matrix = makeMatrix4(matrix);
@@ -515,7 +554,11 @@ function Renderer(container, image, imageType, dynamic) {
             if (program.nodeCache.length > 200 &&
                 program.nodeCache.length > program.currentNodes.length + 50) {
                 // Remove older nodes from cache
-                program.nodeCache.splice(200, program.nodeCache.length - 200);
+                var removed = program.nodeCache.splice(200, program.nodeCache.length - 200);
+                for (var i = 0; i < removed.length; i++) {
+                    // Explicitly delete textures
+                    gl.deleteTexture(removed[i].texture);
+                }
             }
             program.currentNodes = [];
             
@@ -537,7 +580,7 @@ function Renderer(container, image, imageType, dynamic) {
             multiresDraw();
         }
         
-        if (returnImage !== undefined) {
+        if (params.returnImage !== undefined) {
             return canvas.toDataURL('image/png');
         }
     };
@@ -619,12 +662,12 @@ function Renderer(container, image, imageType, dynamic) {
                     //gl.uniform4f(program.colorUniform, color[0], color[1], color[2], 1.0);
                     
                     // Bind vertex buffer and pass vertices to WebGL
-                    gl.bindBuffer(gl.ARRAY_BUFFER, program.cubeVertBuf);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertBuf);
                     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(program.currentNodes[i].vertices), gl.STATIC_DRAW);
                     gl.vertexAttribPointer(program.vertPosLocation, 3, gl.FLOAT, false, 0, 0);
                     
                     // Prep for texture
-                    gl.bindBuffer(gl.ARRAY_BUFFER, program.cubeVertTexCoordBuf);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertTexCoordBuf);
                     gl.vertexAttribPointer(program.texCoordLocation, 2, gl.FLOAT, false, 0, 0);
                     
                     // Bind texture and draw tile
@@ -833,24 +876,31 @@ function Renderer(container, image, imageType, dynamic) {
      * @private
      * @param {number[]} m - Matrix to rotate.
      * @param {number[]} angle - Angle to rotate by in radians.
-     * @param {string} axis - Axis to rotate about (`x` or `y`).
+     * @param {string} axis - Axis to rotate about (`x`, `y`, or `z`).
      * @returns {number[]} Rotated matrix.
      */
     function rotateMatrix(m, angle, axis) {
         var s = Math.sin(angle);
         var c = Math.cos(angle);
-        if ( axis == 'x' ) {
+        if (axis == 'x') {
             return [
                 m[0], c*m[1] + s*m[2], c*m[2] - s*m[1],
                 m[3], c*m[4] + s*m[5], c*m[5] - s*m[4],
                 m[6], c*m[7] + s*m[8], c*m[8] - s*m[7]
             ];
         }
-        if ( axis == 'y' ) {
+        if (axis == 'y') {
             return [
                 c*m[0] - s*m[2], m[1], c*m[2] + s*m[0],
                 c*m[3] - s*m[5], m[4], c*m[5] + s*m[3],
                 c*m[6] - s*m[8], m[7], c*m[8] + s*m[6]
+            ];
+        }
+        if (axis == 'z') {
+            return [
+                c*m[0] + s*m[1], c*m[1] - s*m[0], m[2],
+                c*m[3] + s*m[4], c*m[4] - s*m[3], m[5],
+                c*m[6] + s*m[7], c*m[7] - s*m[6], m[8]
             ];
         }
     }
@@ -920,7 +970,57 @@ function Renderer(container, image, imageType, dynamic) {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.bindTexture(gl.TEXTURE_2D, null);
     }
-    
+
+    // Based on http://blog.tojicode.com/2012/03/javascript-memory-optimization-and.html
+    var loadTexture = (function() {
+        var cacheTop = 4;   // Maximum number of concurrents loads
+        var textureImageCache = {};
+        var pendingTextureRequests = [];
+
+        function TextureImageLoader() {
+            var self = this;
+            this.texture = this.callback = null;
+            this.image = new Image();
+            this.image.addEventListener('load', function() {
+                processLoadedTexture(self.image, self.texture);
+                releaseTextureImageLoader(self);
+                self.callback(self.texture);
+            });
+        };
+
+        TextureImageLoader.prototype.loadTexture = function(src, texture, callback) {
+            this.texture = texture;
+            this.callback = callback;
+            this.image.src = src;
+        };
+
+        function PendingTextureRequest(src, texture, callback) {
+            this.src = src;
+            this.texture = texture;
+            this.callback = callback;
+        };
+
+        function releaseTextureImageLoader(til) {
+            if (pendingTextureRequests.length) {
+                var req = pendingTextureRequests.shift();
+                til.loadTexture(req.src, req.texture, req.callback);
+            } else
+                textureImageCache[cacheTop++] = til;
+        }
+
+        for (var i = 0; i < cacheTop; i++)
+            textureImageCache[i] = new TextureImageLoader();
+
+        return function(src, callback) {
+            var texture = gl.createTexture();
+            if (cacheTop)
+                textureImageCache[--cacheTop].loadTexture(src, texture, callback);
+            else
+                pendingTextureRequests.push(new PendingTextureRequest(src, texture, callback));
+            return texture;
+        };
+    })();
+
     /**
      * Loads image and creates texture for a multires node / tile.
      * @private
@@ -928,15 +1028,10 @@ function Renderer(container, image, imageType, dynamic) {
      */
     function processNextTile(node) {
         if (!node.texture) {
-            node.texture = gl.createTexture();
-            node.image = new Image();
-            node.image.crossOrigin = 'anonymous';
-            node.image.onload = function() {
-                processLoadedTexture(node.image, node.texture);
+            loadTexture(encodeURI(node.path + '.' + image.extension), function(texture) {
+                node.texture = texture;
                 node.textureLoaded = true;
-                delete node.image;
-            };
-            node.image.src = encodeURI(node.path + '.' + image.extension);
+            });
         }
     }
     
@@ -1088,6 +1183,7 @@ var fragCube = [
 'uniform float u_h;',
 'uniform float u_v;',
 'uniform float u_vo;',
+'uniform float u_rot;',
 
 'const float PI = 3.14159265358979323846264;',
 
@@ -1101,7 +1197,10 @@ var fragCube = [
     // Find the vector of focal point to view plane
     'vec3 planePos = vec3(v_texCoord.xy, 0.0);',
     'planePos.x *= u_aspectRatio;',
-    'vec3 viewVector = planePos - vec3(0.0,0.0,-u_f);',
+    'float sinrot = sin(u_rot);',
+    'float cosrot = cos(u_rot);',
+    'vec3 rotPos = vec3(planePos.x * cosrot - planePos.y * sinrot, planePos.x * sinrot + planePos.y * cosrot, 0.0);',
+    'vec3 viewVector = rotPos - vec3(0.0, 0.0, -u_f);',
 
     // Rotate vector for psi (yaw) and theta (pitch)
     'float sinpsi = sin(-u_psi);',
