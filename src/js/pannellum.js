@@ -60,6 +60,7 @@ var config,
     autoRotateStart,
     autoRotateSpeed = 0,
     externalEventListeners = {},
+    specifiedPhotoSphereExcludes = [],
     update = false, // Should we update when still to render dynamic content
     hotspotsCreated = false;
 
@@ -89,7 +90,7 @@ var defaultConfig = {
 
 // Initialize container
 container = typeof container === 'string' ? document.getElementById(container) : container;
-container.className += ' pnlm-container';
+container.classList.add('pnlm-container');
 container.tabIndex = 0;
 
 // Create container for renderer
@@ -470,10 +471,13 @@ function parseGPanoXMP(image) {
                 xmp.topPixels !== null) {
                 
                 // Set up viewer using GPano XMP data
-                config.haov = xmp.croppedWidth / xmp.fullWidth * 360;
-                config.vaov = xmp.croppedHeight / xmp.fullHeight * 180;
-                config.vOffset = ((xmp.topPixels + xmp.croppedHeight / 2) / xmp.fullHeight - 0.5) * -180;
-                if (xmp.heading !== null) {
+                if (specifiedPhotoSphereExcludes.indexOf('haov') < 0)
+                    config.haov = xmp.croppedWidth / xmp.fullWidth * 360;
+                if (specifiedPhotoSphereExcludes.indexOf('vaov') < 0)
+                    config.vaov = xmp.croppedHeight / xmp.fullHeight * 180;
+                if (specifiedPhotoSphereExcludes.indexOf('vOffset') < 0)
+                    config.vOffset = ((xmp.topPixels + xmp.croppedHeight / 2) / xmp.fullHeight - 0.5) * -180;
+                if (xmp.heading !== null && specifiedPhotoSphereExcludes.indexOf('northOffset') < 0) {
                     // TODO: make sure this works correctly for partial panoramas
                     config.northOffset = xmp.heading;
                     if (config.compass !== false) {
@@ -481,8 +485,10 @@ function parseGPanoXMP(image) {
                     }
                 }
                 if (xmp.horizonPitch !== null && xmp.horizonRoll !== null) {
-                    panoImage.horizonPitch = xmp.horizonPitch / 180 * Math.PI;
-                    panoImage.horizonRoll = xmp.horizonRoll / 180 * Math.PI;
+                    if (specifiedPhotoSphereExcludes.indexOf('horizonPitch') < 0)
+                        config.horizonPitch = xmp.horizonPitch / 180 * Math.PI;
+                    if (specifiedPhotoSphereExcludes.indexOf('horizonRoll') < 0)
+                        config.horizonRoll = xmp.horizonRoll / 180 * Math.PI;
                 }
                 
                 // TODO: add support for initial view settings
@@ -1361,7 +1367,12 @@ function orientationListener(e) {
  */
 function renderInit() {
     try {
-        renderer.init(panoImage, config.type, config.dynamic, config.haov * Math.PI / 180, config.vaov * Math.PI / 180, config.vOffset * Math.PI / 180, renderInitCallback);
+        var params = {};
+        if (config.horizonPitch !== undefined)
+            params.horizonPitch = config.horizonPitch;
+        if (config.horizonRoll !== undefined)
+            params.horizonRoll = config.horizonRoll;
+        renderer.init(panoImage, config.type, config.dynamic, config.haov * Math.PI / 180, config.vaov * Math.PI / 180, config.vOffset * Math.PI / 180, renderInitCallback, params);
         if (config.dynamic !== true) {
             // Allow image to be garbage collected
             panoImage = undefined;
@@ -1499,7 +1510,7 @@ function createHotSpots() {
             }
             
             if (hs.text || hs.video || hs.image) {
-                div.className += ' pnlm-tooltip';
+                div.classList.add('pnlm-tooltip');
                 div.appendChild(span);
                 span.style.width = span.scrollWidth - 20 + 'px';
                 span.style.marginLeft = -(span.scrollWidth - 26) / 2 + 'px';
@@ -1576,7 +1587,8 @@ function renderHotSpots() {
 function mergeConfig(sceneId) {
     config = {};
     var k;
-    var photoSphereExcludes = ['haov', 'vaov', 'vOffset', 'northOffset'];
+    var photoSphereExcludes = ['haov', 'vaov', 'vOffset', 'northOffset', 'horizonPitch', 'horizonRoll'];
+    specifiedPhotoSphereExcludes = [];
     
     // Merge default config
     for (k in defaultConfig) {
@@ -1590,7 +1602,7 @@ function mergeConfig(sceneId) {
         if (initialConfig.default.hasOwnProperty(k)) {
             config[k] = initialConfig.default[k];
             if (photoSphereExcludes.indexOf(k) >= 0) {
-                config.ignoreGPanoXMP = true;
+                specifiedPhotoSphereExcludes.push(k);
             }
         }
     }
@@ -1602,7 +1614,7 @@ function mergeConfig(sceneId) {
             if (scene.hasOwnProperty(k)) {
                 config[k] = scene[k];
                 if (photoSphereExcludes.indexOf(k) >= 0) {
-                    config.ignoreGPanoXMP = true;
+                    specifiedPhotoSphereExcludes.push(k);
                 }
             }
         }
@@ -1614,7 +1626,7 @@ function mergeConfig(sceneId) {
         if (initialConfig.hasOwnProperty(k)) {
             config[k] = initialConfig[k];
             if (photoSphereExcludes.indexOf(k) >= 0) {
-                config.ignoreGPanoXMP = true;
+                specifiedPhotoSphereExcludes.push(k);
             }
         }
     }
@@ -1865,7 +1877,10 @@ function loadScene(sceneId, targetPitch, targetYaw, targetHfov, fadeDone) {
     
     // Create the new config for the scene
     mergeConfig(sceneId);
-    
+
+    // Stop motion
+    yawSpeed = pitchSpeed = zoomSpeed = 0;
+
     // Reload scene
     processOptions();
     if (workingPitch !== undefined) {
@@ -2077,6 +2092,32 @@ this.setNorthOffset = function(heading) {
 };
 
 /**
+ * Start auto rotation.
+ * @memberof Viewer
+ * @instance
+ * @param {number} [speed] - Auto rotation speed / direction. If not specified, previous value is used.
+ * @returns {Viewer} `this`
+ */
+this.startAutoRotate = function(speed) {
+    speed = speed || autoRotateSpeed || 1;
+    config.autoRotate = speed;
+    animateInit();
+    return this;
+};
+
+/**
+ * Stop auto rotation.
+ * @memberof Viewer
+ * @instance
+ * @returns {Viewer} `this`
+ */
+this.stopAutoRotate = function() {
+    autoRotateSpeed = config.autoRotate;
+    config.autoRotate = false;
+    return this;
+};
+
+/**
  * Returns the panorama renderer.
  * @memberof Viewer
  * @instance
@@ -2211,6 +2252,44 @@ function fireEvent(type) {
             externalEventListeners[type][i].apply(null, [].slice.call(arguments, 1));
         }
     }
+}
+
+/**
+ * Destructor.
+ * @instance
+ * @memberof Viewer
+ */
+this.destroy = function() {
+    if (renderer)
+        renderer.destroy()
+    if (listenersAdded) {
+        container.removeEventListener('mousedown', onDocumentMouseDown, false);
+        document.removeEventListener('mousemove', onDocumentMouseMove, false);
+        document.removeEventListener('mouseup', onDocumentMouseUp, false);
+        container.removeEventListener('mousewheel', onDocumentMouseWheel, false);
+        container.removeEventListener('DOMMouseScroll', onDocumentMouseWheel, false);
+        container.removeEventListener('mozfullscreenchange', onFullScreenChange, false);
+        container.removeEventListener('webkitfullscreenchange', onFullScreenChange, false);
+        container.removeEventListener('msfullscreenchange', onFullScreenChange, false);
+        container.removeEventListener('fullscreenchange', onFullScreenChange, false);
+        window.removeEventListener('resize', onDocumentResize, false);
+        window.removeEventListener('orientationchange', onDocumentResize, false);
+        container.removeEventListener('keydown', onDocumentKeyPress, false);
+        container.removeEventListener('keyup', onDocumentKeyUp, false);
+        container.removeEventListener('blur', clearKeys, false);
+        document.removeEventListener('mouseleave', onDocumentMouseUp, false);
+        container.removeEventListener('touchstart', onDocumentTouchStart, false);
+        container.removeEventListener('touchmove', onDocumentTouchMove, false);
+        container.removeEventListener('touchend', onDocumentTouchEnd, false);
+        container.removeEventListener('pointerdown', onDocumentPointerDown, false);
+        container.removeEventListener('pointermove', onDocumentPointerMove, false);
+        container.removeEventListener('pointerup', onDocumentPointerUp, false);
+        container.removeEventListener('pointerleave', onDocumentPointerUp, false);
+    }
+    container.innerHTML = '';
+    container.classList.remove('pnlm-container');
+    container.classList.remove('pnlm-grab');
+    container.classList.remove('pnlm-grabbing');
 }
 
 }
