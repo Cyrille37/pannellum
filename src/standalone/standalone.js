@@ -32,7 +32,7 @@ function parseURLParameters() {
             case 'tour':
                 console.log('The `tour` parameter is deprecated and will be removed. Use the `config` parameter instead.')
             case 'author': case 'title': case 'firstScene': case 'fallback':
-            case 'preview': case 'panorama': case 'config': case 'basePath':
+            case 'preview': case 'panorama': case 'config':
                 configFromURL[option] = decodeURIComponent(value);
                 break;
             default:
